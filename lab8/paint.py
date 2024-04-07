@@ -1,96 +1,120 @@
 import pygame
 
-def main():
-    pygame.init()
-    screen = pygame.display.set_mode((640, 480))
-    clock = pygame.time.Clock()
-    
-    radius = 15
-    x = 0
-    y = 0
-    mode = 'blue'
-    points = []
-    eraser = False
-    
-    while True:
-        
-        pressed = pygame.key.get_pressed()
-        
-        alt_held = pressed[pygame.K_LALT] or pressed[pygame.K_RALT]
-        ctrl_held = pressed[pygame.K_LCTRL] or pressed[pygame.K_RCTRL]
-        
-        for event in pygame.event.get():
-            
-            if event.type == pygame.QUIT:
-                return
-            if event.type == pygame.KEYDOWN:
-                if event.key == pygame.K_w and ctrl_held:
-                    return
-                if event.key == pygame.K_F4 and alt_held:
-                    return
-                if event.key == pygame.K_ESCAPE:
-                    return
-                if event.key == pygame.K_r:
-                    mode = 'red'
-                elif event.key == pygame.K_g:
-                    mode = 'green'
-                elif event.key == pygame.K_b:
-                    mode = 'blue'
-                elif event.key == pygame.K_e:
-                    eraser = not eraser
-            
-            if event.type == pygame.MOUSEBUTTONDOWN:
-                if event.button == 1: # left click
-                    if eraser:
-                        points = []
-                    else:
-                        points.append(event.pos)
-                elif event.button == 3: # right click
-                    if eraser:
-                        points = []
-                    else:
-                        points = points[:-1]
-            
-        screen.fill((0, 0, 0))
-        
-        drawShapes(screen, points, radius, mode, eraser)
-        
-        pygame.display.flip()
-        
-        clock.tick(60)
+pygame.init()  # Инициализация Pygame
+WIDTH, HEIGHT = 800, 800  # Установка ширины и высоты окна
+SCREEN = pygame.display.set_mode((WIDTH, HEIGHT))  # Создание экрана
+BLACK = pygame.Color(0, 0, 0)  # Определение цветов
+WHITE = pygame.Color(255, 255, 255)
 
-def drawShapes(screen, points, radius, color_mode, eraser):
-    for i in range(len(points) - 1):
-        if not eraser:
-            drawLineBetween(screen, points[i], points[i + 1], radius, color_mode)
-        else:
-            pygame.draw.circle(screen, (0, 0, 0), points[i], radius)
-    if len(points) > 1 and not eraser:
-        pygame.draw.circle(screen, (0, 0, 0), points[-1], radius)
-    for point in points:
-        pygame.draw.circle(screen, (255, 255, 255), point, radius - 2)
 
-def drawLineBetween(screen, start, end, width, color_mode):
-    c1 = max(0, min(255, 2 * start[0] - 256))
-    c2 = max(0, min(255, 2 * start[0]))
-    
-    if color_mode == 'blue':
-        color = (c1, c1, c2)
-    elif color_mode == 'red':
-        color = (c2, c1, c1)
-    elif color_mode == 'green':
-        color = (c1, c2, c1)
-    
-    dx = start[0] - end[0]
-    dy = start[1] - end[1]
-    iterations = max(abs(dx), abs(dy))
-    
-    for i in range(iterations):
-        progress = 1.0 * i / iterations
-        aprogress = 1 - progress
-        x = int(aprogress * start[0] + progress * end[0])
-        y = int(aprogress * start[1] + progress * end[1])
-        pygame.draw.circle(screen, color, (x, y), width)
+class GameObject:
+    def draw(self):  # Метод отрисовки
+        raise NotImplementedError
 
-if __name__ == "__main__":
-    main()
+    def handle(self, mouse_pos):  # Метод обработки событий
+        raise NotImplementedError
+
+
+class Button:
+    def __init__(self):
+        self.rect = pygame.draw.rect(  # Создание кнопки в виде прямоугольника
+            SCREEN,
+            (0, 255, 0),  # Цвет кнопки
+            (WIDTH // 2 - 20, 20, 40, 40)  # Позиция и размеры кнопки
+        )
+
+    def draw(self):  # Метод отрисовки кнопки
+        self.rect = pygame.draw.rect(
+            SCREEN,
+            (0, 255, 0),  # Цвет кнопки
+            (WIDTH // 2 - 20, 20, 40, 40)  # Позиция и размеры кнопки
+        )
+
+
+class Pen(GameObject):
+    def __init__(self, *args, **kwargs):
+        self.points = []  # Список точек для рисования линии
+
+    def draw(self):  # Метод отрисовки
+        for idx, value in enumerate(self.points[:-1]):
+            pygame.draw.line(
+                SCREEN,
+                WHITE,
+                start_pos=value,  # Начальная позиция линии
+                end_pos=self.points[idx + 1],  # Конечная позиция линии
+            )
+
+    def handle(self, mouse_pos):  # Метод обработки движения мыши
+        self.points.append(mouse_pos)
+
+
+class Rectangle(GameObject):
+    def __init__(self, start_pos):
+        self.start_pos = start_pos  # Начальная позиция прямоугольника
+        self.end_pos = start_pos  # Конечная позиция прямоугольника
+
+    def draw(self):  # Метод отрисовки прямоугольника
+        start_pos_x = min(self.start_pos[0], self.end_pos[0])
+        start_pos_y = min(self.start_pos[1], self.end_pos[1])
+
+        end_pos_x = max(self.start_pos[0], self.end_pos[0])
+        end_pos_y = max(self.start_pos[1], self.end_pos[1])
+
+        pygame.draw.rect(
+            SCREEN,
+            WHITE,
+            (
+                start_pos_x,
+                start_pos_y,
+                end_pos_x - start_pos_x,
+                end_pos_y - start_pos_y,
+            ),
+            width=5,  # Толщина линии
+        )
+
+    def handle(self, mouse_pos):  # Метод обработки движения мыши
+        self.end_pos = mouse_pos
+
+
+def main():  # Основная функция
+    running = True  # Флаг работы игры
+    clock = pygame.time.Clock()  # Создание объекта для отслеживания времени
+    active_obj = None  # Активный объект (используется для рисования)
+    button = Button()  # Создание кнопки
+
+    objects = [
+        button,  # Список объектов (в данном случае - кнопка)
+    ]
+    # current_shape = 'pen'
+    current_shape = Pen  # Текущий инструмент рисования
+
+    while running:  # Главный игровой цикл
+        SCREEN.fill(BLACK)  # Заливка экрана черным цветом
+
+        for event in pygame.event.get():  # Обработка событий
+            if event.type == pygame.QUIT:  # Если нажата кнопка закрытия окна
+                running = False  # Остановка игры
+
+            if event.type == pygame.MOUSEBUTTONDOWN:  # Если нажата кнопка мыши
+                if button.rect.collidepoint(event.pos):  # Если нажата кнопка
+                    current_shape = Rectangle  # Текущий инструмент рисования - прямоугольник
+                else:
+                    active_obj = current_shape(start_pos=event.pos)  # Создание активного объекта
+
+            if event.type == pygame.MOUSEMOTION and active_obj is not None:  # Если движение мыши и активный объект существует
+                active_obj.handle(pygame.mouse.get_pos())  # Обработка движения мыши
+                active_obj.draw()  # Отрисовка объекта
+
+            if event.type == pygame.MOUSEBUTTONUP and active_obj is not None:  # Если кнопка мыши отпущена и активный объект существует
+                objects.append(active_obj)  # Добавление объекта в список
+                active_obj = None  # Сброс активного объекта
+
+        for obj in objects:  # Отрисовка всех объектов
+            obj.draw()
+
+        clock.tick(30)  # Установка FPS
+        pygame.display.flip()  # Обновление экрана
+
+
+if __name__ == '__main__':
+    main()  # Запуск основной функции
