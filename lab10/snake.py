@@ -1,172 +1,197 @@
+import pygame as pg
 import random
-import pygame
+import time
 import sqlite3
 
-# Pygame initialization
-pygame.init()
-
-# Game window dimensions
-WIDTH, HEIGHT = 600, 400
-
-# Cell size in the game grid
-CELL_SIZE = 20
-
-# Initial snake speed
-SNAKE_SPEED = 10
-
-# Colors
-WHITE = (255, 255, 255)
-BLACK = (0, 0, 0)
-RED = (255, 0, 0)
-GREEN = (0, 255, 0)
-
-# Directions
-UP = (0, -1)
-DOWN = (0, 1)
-LEFT = (-1, 0)
-RIGHT = (1, 0)
-
-# Connect to the database
+# Connection to SQLite3 database
 conn = sqlite3.connect('snake_game.db')
-cursor = conn.cursor()
+cur = conn.cursor()
 
-# Create tables if not exist
-cursor.execute("""
-CREATE TABLE IF NOT EXISTS User (
-    user_id INTEGER PRIMARY KEY,
-    username TEXT UNIQUE
-);
-
-CREATE TABLE IF NOT EXISTS User_Score (
-    score_id INTEGER PRIMARY KEY,
-    user_id INTEGER,
-    score INTEGER,
-    level INTEGER,
-    FOREIGN KEY (user_id) REFERENCES User(user_id)
-);
+# Create users table if it doesn't exist
+cur.execute("""
+    CREATE TABLE IF NOT EXISTS users (
+        user_name TEXT PRIMARY KEY,
+        user_score INTEGER,
+        user_level INTEGER
+    )
 """)
-conn.commit()
 
-class Snake:
-    def __init__(self):
-        self.body = [(WIDTH // 2, HEIGHT // 2)]
-        self.direction = random.choice([UP, DOWN, LEFT, RIGHT])
-        self.score = 0
-        self.level = 1
-        self.food = self.generate_food()
-        self.food_timer = 10 * SNAKE_SPEED
+# Get user name
+user_name = input("Enter your username: ")
+user_score = 0 
+user_level = 1
 
-    def move(self):
-        x, y = self.body[0]
-        dx, dy = self.direction
-        new_head = ((x + dx * CELL_SIZE) % WIDTH, (y + dy * CELL_SIZE) % HEIGHT)
+# Check if the user exists in the database
+cur.execute("SELECT * FROM users WHERE user_name = ?", (user_name,))
+user = cur.fetchone()
 
-        if new_head in self.body[1:] or (new_head[0] < 0 or new_head[0] > WIDTH or new_head[1] < 0 or new_head[1] > HEIGHT):
-            return False
-
-        self.body.insert(0, new_head)
-
-        if new_head == self.food:
-            self.score += random.randint(1, 3)
-            if self.score % 3 == 0:
-                self.level += 1
-            self.food = self.generate_food()
-            self.food_timer = 10 * SNAKE_SPEED
-        else:
-            self.body.pop()
-            self.food_timer -= 1
-            if self.food_timer == 0:
-                self.food = self.generate_food()
-                self.food_timer = 10 * SNAKE_SPEED
-        return True
-
-    def change_direction(self, direction):
-        if (direction[0] * -1, direction[1] * -1) != self.direction:
-            self.direction = direction
-
-    def generate_food(self):
-        while True:
-            food = (random.randint(0, WIDTH // CELL_SIZE - 1) * CELL_SIZE,
-                    random.randint(0, HEIGHT // CELL_SIZE - 1) * CELL_SIZE)
-            if food not in self.body:
-                return food
-
-    def draw(self, surface):
-        for segment in self.body:
-            pygame.draw.rect(surface, GREEN, (segment[0], segment[1], CELL_SIZE, CELL_SIZE))
-        pygame.draw.rect(surface, RED, (self.food[0], self.food[1], CELL_SIZE, CELL_SIZE))
-
-def display_text(surface, text, size, color, position):
-    font = pygame.font.SysFont("Arial", size)
-    text_surface = font.render(text, True, color)
-    surface.blit(text_surface, position)
-
-def authenticate_user(username):
-    cursor.execute("SELECT user_id, username FROM User WHERE username = ?", (username,))
-    user = cursor.fetchone()
-    if user:
-        cursor.execute("SELECT level FROM User_Score WHERE user_id = ? ORDER BY score_id DESC LIMIT 1", (user[0],))
-        level = cursor.fetchone()
-        if level:
-            return user[0], user[1], level[0]
-        else:
-            return user[0], user[1], 1
-    else:
-        return None
-
-def create_user(username):
-    cursor.execute("INSERT INTO User (username) VALUES (?)", (username,))
+# If the user doesn't exist, insert into the database
+if user is None:
+    cur.execute("INSERT INTO users (user_name, user_score, user_level) VALUES (?, ?, ?)",
+                (user_name, user_score, user_level))
     conn.commit()
-    return cursor.lastrowid
+else:
+    user_name, user_score, user_level = user
 
-def save_game_state(user_id, score, level):
-    cursor.execute("INSERT INTO User_Score (user_id, score, level) VALUES (?, ?, ?)", (user_id, score, level))
-    conn.commit()
+clock = pg.time.Clock()
+score = 0
+score_level = 0
+level = user_level
+snake_speed = 10
 
-def main():
-    screen = pygame.display.set_mode((WIDTH, HEIGHT))
-    pygame.display.set_caption('Snake Game')
+# Initializing
+pg.init()
 
-    clock = pygame.time.Clock()
+# Screen setup
+width = 800
+height= 600
+screen = pg.display.set_mode((width, height))
 
-    username = input("Enter your username: ")
-    user_info = authenticate_user(username)
-    if user_info:
-        user_id, username, level = user_info
+# For checking if our snake eats food
+snake_pos = [100,60]
+
+# Snake body parts (by default the starting 4 blocks) 
+snake_body = [
+    [100,60], 
+    [80,60],
+    [60,60],
+    [40,60],
+]
+
+# For checking if snake eats
+food_eaten = False
+
+# Food's position
+food_pos = [random.randint(2,width//20-1)*20 ,random.randint(2,height//20-1)*20 ]
+
+# Current direction (by default to right)
+direction = 'RIGHT'
+# Changing direction 
+change_to = direction
+
+# Functions for game over and score display
+def game_over():
+    font = pg.font.Font("lab10/BebasNeue-Regular.ttf", 50)
+    game_over_surface = font.render("Game Over", True, (0, 255, 0))
+    screen.fill('red')
+    score_surface = font.render("SCORES:"+str(score), True, (0, 255, 0))
+    screen.blit(score_surface, score_surface.get_rect(center=(width//2+100,height//2+100)))
+    screen.blit(game_over_surface, game_over_surface.get_rect(center=(width//2,height//2)))
+    pg.display.flip()
+    time.sleep(2)
+    pg.quit()
+    quit()
+
+def score_to_screen():
+    font = pg.font.Font("lab10/BebasNeue-Regular.ttf", 20)
+    score_surface = font.render("SCORES:"+str(score), True, (0, 255, 0))
+    screen.blit(score_surface, score_surface.get_rect(center=(150,10)))
+
+def level_to_screen():
+    font = pg.font.Font("lab10/BebasNeue-Regular.ttf", 20)
+    level_surface = font.render("level:"+str(level), True, (0, 255, 0))
+    screen.blit(level_surface, level_surface.get_rect(center=(50,10)))
+
+# Game loop
+done = False
+while not done:
+    for event in pg.event.get():
+        if event.type == pg.QUIT:
+            done = True
+            cur.execute("UPDATE users SET user_score = ?, user_level = ? WHERE user_name = ?",
+                        (score, level, user_name))
+            conn.commit()
+        if event.type == pg.KEYDOWN:
+            if event.key == pg.K_RIGHT:
+                change_to = "RIGHT"
+            if event.key == pg.K_LEFT:
+                change_to = "LEFT"
+            if event.key == pg.K_UP:
+                change_to = "UP"
+            if event.key == pg.K_DOWN:
+                change_to = "DOWN"
+    
+    # Check direction
+    if change_to=="RIGHT" and direction != "LEFT":
+        direction = "RIGHT"
+    if change_to=="LEFT" and direction != "RIGHT":
+        direction = "LEFT"
+    if change_to=="UP" and direction != "DOWN":
+        direction = "UP"
+    if change_to=="DOWN" and direction != "UP":
+        direction = "DOWN"
+
+    # Move the snake
+    if direction == "RIGHT":
+        snake_pos[0] += 20
+    if direction == "LEFT":
+        snake_pos[0] -= 20
+    if direction == "UP":
+        snake_pos[1] -= 20
+    if direction == "DOWN":
+        snake_pos[1] += 20
+
+    snake_body.insert(0, list(snake_pos) )
+    if snake_pos[0]==food_pos[0] and snake_pos[1]==food_pos[1]:
+        score += 10
+        score_level += 10
+        food_eaten = True
+        if score_level > 50 :
+            level += 1
+            score_level = 0 
+            snake_speed += 1
     else:
-        user_id = create_user(username)
-        level = 1
+        snake_body.pop()
+    
+    if food_eaten:
+        cant_choose = False 
+        food_pos =  [random.randint(2,width//20-1)*20 ,random.randint(2,height//20-1)*20 ]
+        for i in snake_body:
+                if i==food_pos:
+                    cant_choose = True
+                    break
+        while cant_choose:
+            cant_choose = False
+            food_pos =  [random.randint(2,width//20-1)*20 ,random.randint(2,height//20-1)*20 ]
+            for i in snake_body:
+                if i==food_pos:
+                    cant_choose = True
+                    break
 
-    snake = Snake()
+    for i in snake_body:
+        if food_eaten :
+            food_pos =  [random.randint(2,width//20-1)*20 ,random.randint(2,height//20-1)*20 ]
+        if i==food_pos:
+            food_pos =  [random.randint(2,width//20-1)*20 ,random.randint(2,height//20-1)*20 ]
 
-    running = True
-    while running:
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                running = False
-            elif event.type == pygame.KEYDOWN:
-                if event.key == pygame.K_UP:
-                    snake.change_direction(UP)
-                elif event.key == pygame.K_DOWN:
-                    snake.change_direction(DOWN)
-                elif event.key == pygame.K_LEFT:
-                    snake.change_direction(LEFT)
-                elif event.key == pygame.K_RIGHT:
-                    snake.change_direction(RIGHT)
-                elif event.key == pygame.K_p:  # Pause and save game state
-                    save_game_state(user_id, snake.score, snake.level)
-                    running = False
+    food_eaten= False
+    screen.fill('black')
+    pg.draw.line(screen ,(0,255,0), (0,20), (800, 20) )
+    pg .draw.rect(screen,(0,0,0),(780,1,19,19))
 
-        if not snake.move():
-            running = False
-        screen.fill(BLACK)
-        snake.draw(screen)
-        display_text(screen, f"Score: {snake.score}", 20, WHITE, (10, 10))
-        display_text(screen, f"Level: {snake.level}", 20, WHITE, (10, 30))
-        pygame.display.flip()
-        clock.tick(SNAKE_SPEED + snake.level)
+    pg.draw.rect(screen, 'red',(snake_body[0][0],snake_body[0][1], 20,20))
+    for pos in snake_body[1:]:
+        pg.draw.rect(screen, 'yellow',(pos[0],pos[1], 20,20))
 
-    pygame.quit()
+    pg.draw.rect(screen, 'white', (food_pos[0], food_pos[1], 20, 20))
 
-if __name__ == "__main__":
-    main()
+    # Check if the snake touches the borders
+    if snake_pos[0]>width-20 or snake_pos[0]<0 or snake_pos[1]<20 or snake_pos[1]>height-20 :
+        cur.execute("UPDATE users SET user_score = ?, user_level = ? WHERE user_name = ?",
+                    (score, level, user_name))
+        conn.commit()
+        game_over()
+    
+    # Check if the snake touches its own body
+    for part in snake_body[1:]:
+        if snake_pos == part:
+            cur.execute("UPDATE users SET user_score = ?, user_level = ? WHERE user_name = ?",
+                        (score, level, user_name))
+            conn.commit()
+            game_over()
+    
+    score_to_screen()
+    level_to_screen()
+
+    pg.display.update()
+    clock.tick(snake_speed)
